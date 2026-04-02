@@ -57,9 +57,8 @@ fn setup(
     ));
 
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(0.5, 0.5, 0.5))),
-        MeshMaterial3d(materials.add(Color::srgb_u8(128, 128, 128))),
-        Transform::from_xyz(0.0, 0.5, 0.0),
+        SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("turret.glb"))),
+        Transform::from_scale(Vec3::splat(0.75)),
         CursorObject,
     ));
 
@@ -189,14 +188,18 @@ fn interact(
     let turret_cost = 100;
     if let Some(t) = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)) {
         let hitp = ray.origin + ray.direction.as_vec3() * t;
-        cursor_trans.translation = hitp;
-        if buttons.just_pressed(MouseButton::Left) && player.monies >= turret_cost {
-            player.monies -= turret_cost;
-            commands.spawn((
-                SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("turret.glb"))),
-                Transform::from_translation(hitp).with_scale(Vec3::splat(0.75)),
-                Turret,
-            ));
+        if player.monies >= turret_cost {
+            cursor_trans.translation = hitp;
+            if buttons.just_pressed(MouseButton::Left) {
+                player.monies -= turret_cost;
+                commands.spawn((
+                    SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("turret.glb"))),
+                    Transform::from_translation(hitp).with_scale(Vec3::splat(0.75)),
+                    Turret,
+                ));
+            }
+        } else {
+            cursor_trans.translation = vec3(0.0, -100.0, 0.0);
         }
     }
 }
@@ -306,7 +309,7 @@ fn rats_reach_center(
 }
 
 fn make_turrets_face_camera(
-    mut turrets_trans: Query<&mut Transform, With<Turret>>,
+    mut turrets_trans: Query<&mut Transform, Or<(With<Turret>, With<CursorObject>)>>,
     camera_trans: Single<&GlobalTransform, With<Camera>>,
 ) {
     let mut target = camera_trans.translation();
