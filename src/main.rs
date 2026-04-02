@@ -1,14 +1,17 @@
 use std::f32::consts::{PI, TAU};
 
 use bevy::anti_alias::fxaa::Fxaa;
+#[cfg(not(target_arch = "wasm32"))]
 use bevy::anti_alias::taa::TemporalAntiAliasing;
 use bevy::asset::AssetMetaCheck;
 use bevy::camera::Hdr;
 use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin};
 use bevy::light::{CascadeShadowConfigBuilder, NotShadowCaster};
-use bevy::math::VectorSpace;
+#[cfg(not(target_arch = "wasm32"))]
 use bevy::pbr::{ContactShadows, ScreenSpaceAmbientOcclusion};
 use bevy::post_process::bloom::Bloom;
+#[cfg(not(target_arch = "wasm32"))]
+use bevy::post_process::motion_blur::MotionBlur;
 use bevy::prelude::*;
 
 use crate::noise::hash_noise;
@@ -24,7 +27,7 @@ fn main() {
         .add_plugins(FreeCameraPlugin)
         .insert_resource(GlobalAmbientLight::NONE)
         .add_systems(Startup, setup)
-        .add_systems(Update, (interact, spawn_rats, move_rats, kill_rats))
+        .add_systems(Update, (interact, spawn_rats, move_rats, rats_reach_center))
         .run();
 }
 
@@ -53,22 +56,33 @@ fn setup(
     // obelisk or somesuch
     let obelisk_color = Color::srgb(10.0, 4.0, 1.0);
     let obelisk_pos = Transform::from_xyz(0.0, 1.25, 0.0);
+    let obelisk_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.01, 0.004, 0.001),
+        emissive: obelisk_color.to_linear(),
+        ..default()
+    });
+    let light_entity = commands
+        .spawn((
+            PointLight {
+                intensity: 800.0,
+                radius: 0.125,
+                shadow_maps_enabled: true,
+                color: obelisk_color,
+                ..default()
+            },
+            obelisk_pos,
+        ))
+        .id();
     commands.spawn((
         Mesh3d(meshes.add(Sphere::new(1.0).mesh().uv(64, 48))),
-        MeshMaterial3d(materials.add(obelisk_color)),
+        MeshMaterial3d(obelisk_material.clone()),
         obelisk_pos,
         NotShadowCaster,
-        Obelisk,
-    ));
-    commands.spawn((
-        PointLight {
-            intensity: 800.0,
-            radius: 0.125,
-            shadow_maps_enabled: true,
-            color: obelisk_color,
-            ..default()
+        Obelisk {
+            health: 100.0,
+            material: obelisk_material,
+            light_entity,
         },
-        obelisk_pos,
     ));
 
     // camera
@@ -100,6 +114,10 @@ fn setup(
         ContactShadows::default(),
         ScreenSpaceAmbientOcclusion::default(),
         TemporalAntiAliasing::default(),
+        MotionBlur {
+            shutter_angle: 1.0,
+            ..Default::default()
+        },
     ));
 
     #[cfg(target_arch = "wasm32")]
@@ -119,7 +137,7 @@ fn setup(
         CascadeShadowConfigBuilder {
             num_cascades: 2,
             minimum_distance: 0.05,
-            maximum_distance: 30.0,
+            maximum_distance: 40.0,
             first_cascade_far_bound: 5.0,
             overlap_proportion: 0.2,
         }
@@ -164,7 +182,11 @@ struct CursorObject;
 struct Turret;
 
 #[derive(Component)]
-struct Obelisk;
+struct Obelisk {
+    pub health: f32,
+    pub material: Handle<StandardMaterial>,
+    light_entity: Entity,
+}
 
 #[derive(Component)]
 struct Rat;
@@ -200,10 +222,23 @@ fn move_rats(time: Res<Time>, mut rats: Query<&mut Transform, With<Rat>>) {
     }
 }
 
-fn kill_rats(mut commands: Commands, rats: Query<(Entity, &Transform), With<Rat>>) {
+fn rats_reach_center(
+    mut commands: Commands,
+    rats: Query<(Entity, &Transform), With<Rat>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut obelisk: Single<&mut Obelisk>,
+    mut lights: Query<&mut PointLight, Without<Obelisk>>,
+) {
     for (entity, rat_trans) in &rats {
         if rat_trans.translation.distance(Vec3::ZERO) < 1.0 {
             commands.entity(entity).despawn();
+            obelisk.health -= 1.0;
+            if let Some(mut mat) = materials.get_mut(obelisk.material.id()) {
+                mat.emissive = LinearRgba::from_vec3(mat.emissive.to_vec3() * 0.9);
+            }
+            if let Ok(mut obelisk_light) = lights.get_mut(obelisk.light_entity) {
+                obelisk_light.intensity *= 0.9;
+            }
         }
     }
 }

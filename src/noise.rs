@@ -4,10 +4,10 @@ use bevy::math::*;
 pub fn uhash(x: u32) -> u32 {
     // from https://nullprogram.com/blog/2018/07/31/
     let mut x = x ^ (x >> 16);
-    x = x.overflowing_mul(0x7feb352d).0;
+    x = x.overflowing_mul(0x21f0aaad).0;
     x = x ^ (x >> 15);
-    x = x.overflowing_mul(0x846ca68b).0;
-    x = x ^ (x >> 16);
+    x = x.overflowing_mul(0xd35a2d97).0;
+    x = x ^ (x >> 15);
     x
 }
 
