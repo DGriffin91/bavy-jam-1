@@ -14,6 +14,7 @@ use bevy::post_process::dof::DepthOfField;
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::post_process::motion_blur::MotionBlur;
 use bevy::prelude::*;
+use bevy::scene::SceneInstanceReady;
 use std::f32::consts::{PI, TAU};
 use std::ops::DerefMut;
 
@@ -106,35 +107,46 @@ fn setup(
     ));
 
     // obelisk or somesuch
-    let obelisk_pos = Transform::from_xyz(0.0, 1.25, 0.0);
+    let obelisk_pos = Transform::from_xyz(0.0, 0.0, 0.0);
     let obelisk_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.0, 0.0, 0.0),
-        emissive: OBELISK_COLOR.to_linear() * 10.0,
+        emissive: OBELISK_COLOR.to_linear() * 2.0,
         ..default()
     });
     let light_entity = commands
         .spawn((
             PointLight {
-                intensity: 5000.0,
-                radius: 0.125,
-                shadow_maps_enabled: true,
+                intensity: 100000.0,
+                radius: 2.5,
+                shadow_maps_enabled: false,
                 color: OBELISK_COLOR,
                 ..default()
             },
             obelisk_pos,
         ))
         .id();
-    commands.spawn((
-        Mesh3d(meshes.add(Sphere::new(1.0).mesh().uv(64, 48))),
-        MeshMaterial3d(obelisk_material.clone()),
-        obelisk_pos,
-        NotShadowCaster,
-        Obelisk {
-            health: MAX_HEALTH,
-            material: obelisk_material,
-            light_entity,
-        },
-    ));
+    commands
+        .spawn((
+            SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("obelisk.glb"))),
+            obelisk_pos,
+            Obelisk {
+                health: MAX_HEALTH,
+                material: obelisk_material.clone(),
+                light_entity,
+            },
+            NotShadowCaster,
+        ))
+        .observe(
+            move |scene_ready: On<SceneInstanceReady>,
+                  children: Query<&Children>,
+                  mut material_instances: Query<&mut MeshMaterial3d<StandardMaterial>>| {
+                for entity in children.iter_descendants(scene_ready.entity) {
+                    if let Ok(mut mat) = material_instances.get_mut(entity) {
+                        mat.0 = obelisk_material.clone();
+                    }
+                }
+            },
+        );
 
     // camera
     let mut camera_emcds = commands.spawn((
@@ -375,8 +387,8 @@ fn spawn_rats(
             let z = (n * TAU).sin() * 100.0;
             commands.spawn((
                 SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("rat1.glb"))),
-                Transform::from_translation(vec3(x, 0.0, z))
-                    .with_scale(1.0 + Vec3::splat(elapse.powf(0.3))),
+                Transform::from_translation(vec3(x, 0.2, z))
+                    .with_scale(0.1 + Vec3::splat(elapse.powf(0.2))),
                 Rat::default(),
             ));
         }
@@ -433,7 +445,7 @@ fn rats_reach_center(
             }
             if let Some(mut mat) = materials.get_mut(obelisk.material.id()) {
                 mat.emissive = LinearRgba::from_vec3(
-                    OBELISK_COLOR.to_linear().to_vec3() * relative_health * 10.0,
+                    OBELISK_COLOR.to_linear().to_vec3() * relative_health * 2.0 - 10.0,
                 );
             }
             if let Ok(mut obelisk_light) = lights.get_mut(obelisk.light_entity) {
