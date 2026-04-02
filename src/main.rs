@@ -1,5 +1,5 @@
-use std::f32::consts::{PI, TAU};
-
+#[cfg(not(target_arch = "wasm32"))]
+use argh::FromArgs;
 use bevy::anti_alias::fxaa::Fxaa;
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::anti_alias::taa::TemporalAntiAliasing;
@@ -13,14 +13,31 @@ use bevy::post_process::bloom::Bloom;
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::post_process::motion_blur::MotionBlur;
 use bevy::prelude::*;
+use std::f32::consts::{PI, TAU};
 
 use crate::noise::hash_noise;
 
 pub mod noise;
 
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(FromArgs, Resource, Clone)]
+/// Config
+pub struct Args {
+    /// enable ssr
+    #[argh(switch)]
+    ssr: bool,
+}
+
 fn main() {
-    App::new()
-        .insert_resource(PlayerData { monies: 500 })
+    let mut app = App::new();
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let args: Args = argh::from_env();
+        app.insert_resource(args.clone());
+    }
+
+    app.insert_resource(PlayerData { monies: 500 })
         .add_plugins(DefaultPlugins.set(AssetPlugin {
             meta_check: AssetMetaCheck::Never,
             ..default()
@@ -55,6 +72,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
+    #[cfg(not(target_arch = "wasm32"))] args: Res<Args>,
 ) {
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::default().mesh().size(500.0, 500.0))),
@@ -136,6 +154,20 @@ fn setup(
             ..Default::default()
         },
     ));
+
+    #[cfg(not(target_arch = "wasm32"))]
+    if args.ssr {
+        camera_emcds.insert(bevy::pbr::ScreenSpaceReflections {
+            min_perceptual_roughness: 0.08..0.12,
+            max_perceptual_roughness: 0.55..0.6,
+            linear_steps: 10,
+            bisection_steps: 5,
+            use_secant: true,
+            thickness: 0.25,
+            linear_march_exponent: 1.0,
+            edge_fadeout: 0.0..0.0,
+        });
+    }
 
     #[cfg(target_arch = "wasm32")]
     camera_emcds.insert(Fxaa::default());
