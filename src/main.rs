@@ -36,6 +36,7 @@ fn main() {
                 move_rats,
                 rats_reach_center,
                 set_hud_ui,
+                make_turrets_face_camera,
             ),
         )
         .run();
@@ -50,10 +51,6 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
-    commands.spawn(SceneRoot(
-        asset_server.load(GltfAssetLabel::Scene(0).from_asset("rat1.glb")),
-    ));
-
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::default().mesh().size(500.0, 500.0))),
         MeshMaterial3d(materials.add(Color::srgb(0.001, 0.05, 0.001))),
@@ -179,9 +176,8 @@ fn interact(
     camera: Single<(&Camera, &GlobalTransform)>,
     mut cursor_trans: Single<&mut Transform, With<CursorObject>>,
     buttons: Res<ButtonInput<MouseButton>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
     mut player: ResMut<PlayerData>,
+    asset_server: Res<AssetServer>,
 ) {
     let Some(cursor_pos) = window.cursor_position() else {
         return;
@@ -197,9 +193,8 @@ fn interact(
         if buttons.just_pressed(MouseButton::Left) && player.monies >= turret_cost {
             player.monies -= turret_cost;
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(0.75, 3.0, 0.75))),
-                MeshMaterial3d(materials.add(Color::srgb_u8(32, 32, 32))),
-                Transform::from_translation(hitp),
+                SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("turret.glb"))),
+                Transform::from_translation(hitp).with_scale(Vec3::splat(0.75)),
                 Turret,
             ));
         }
@@ -307,5 +302,17 @@ fn rats_reach_center(
                 obelisk_light.intensity *= relative_health;
             }
         }
+    }
+}
+
+fn make_turrets_face_camera(
+    mut turrets_trans: Query<&mut Transform, With<Turret>>,
+    camera_trans: Single<&GlobalTransform, With<Camera>>,
+) {
+    let mut target = camera_trans.translation();
+    target.y = 0.0;
+
+    for mut turret_trans in &mut turrets_trans {
+        turret_trans.look_at(target, Vec3::Y);
     }
 }
