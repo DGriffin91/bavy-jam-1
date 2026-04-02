@@ -1,4 +1,4 @@
-use std::f32::consts::PI;
+use std::f32::consts::{PI, TAU};
 
 use bevy::anti_alias::fxaa::Fxaa;
 use bevy::anti_alias::taa::TemporalAntiAliasing;
@@ -11,6 +11,10 @@ use bevy::pbr::{ContactShadows, ScreenSpaceAmbientOcclusion};
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 
+use crate::noise::hash_noise;
+
+pub mod noise;
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(AssetPlugin {
@@ -20,7 +24,7 @@ fn main() {
         .add_plugins(FreeCameraPlugin)
         .insert_resource(GlobalAmbientLight::NONE)
         .add_systems(Startup, setup)
-        .add_systems(Update, interact)
+        .add_systems(Update, (interact, spawn_rats, move_rats, kill_rats))
         .run();
 }
 
@@ -54,6 +58,7 @@ fn setup(
         MeshMaterial3d(materials.add(obelisk_color)),
         obelisk_pos,
         NotShadowCaster,
+        Obelisk,
     ));
     commands.spawn((
         PointLight {
@@ -157,3 +162,48 @@ struct CursorObject;
 
 #[derive(Component)]
 struct Turret;
+
+#[derive(Component)]
+struct Obelisk;
+
+#[derive(Component)]
+struct Rat;
+
+fn spawn_rats(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    time: Res<Time>,
+    mut time_since_last_spawn: Local<f32>,
+) {
+    let spawn_every = 0.01;
+    *time_since_last_spawn += time.delta_secs();
+    if *time_since_last_spawn >= spawn_every {
+        let n = hash_noise(uvec2(0, 0), (time.elapsed_secs() / spawn_every) as u32);
+        let x = (n * TAU).cos() * 100.0;
+        let z = (n * TAU).sin() * 100.0;
+        commands.spawn((
+            SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("rat1.glb"))),
+            Transform::from_translation(vec3(x, 0.0, z)),
+            Rat,
+        ));
+        *time_since_last_spawn = 0.0;
+    }
+}
+
+fn move_rats(time: Res<Time>, mut rats: Query<&mut Transform, With<Rat>>) {
+    let rat_speed = 30.0;
+    for mut rat_trans in &mut rats {
+        let dest = Vec3::ZERO;
+        let dir = (dest - rat_trans.translation).normalize_or_zero();
+        *rat_trans = rat_trans.looking_at(dest, Vec3::Y);
+        rat_trans.translation += dir * time.delta_secs() * rat_speed;
+    }
+}
+
+fn kill_rats(mut commands: Commands, rats: Query<(Entity, &Transform), With<Rat>>) {
+    for (entity, rat_trans) in &rats {
+        if rat_trans.translation.distance(Vec3::ZERO) < 1.0 {
+            commands.entity(entity).despawn();
+        }
+    }
+}
