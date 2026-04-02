@@ -37,6 +37,7 @@ fn main() {
                 rats_reach_center,
                 set_hud_ui,
                 make_turrets_face_camera,
+                lasers_shoot_at_rats,
             ),
         )
         .run();
@@ -44,6 +45,10 @@ fn main() {
 
 const OBELISK_COLOR: Color = Color::srgb(10.0, 4.0, 1.0);
 const MAX_HEALTH: f32 = 200.0;
+const LASER_MAX_RANGE: f32 = 30.0;
+const TURRET_DMG: f32 = 500.0;
+const PAY_FOR_KILL: u32 = 5;
+const TURRET_COST: u32 = 100;
 
 fn setup(
     mut commands: Commands,
@@ -53,7 +58,11 @@ fn setup(
 ) {
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::default().mesh().size(500.0, 500.0))),
-        MeshMaterial3d(materials.add(Color::srgb(0.001, 0.05, 0.001))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::BLACK,
+            perceptual_roughness: 0.3,
+            ..default()
+        })),
     ));
 
     commands.spawn((
@@ -65,7 +74,7 @@ fn setup(
     // obelisk or somesuch
     let obelisk_pos = Transform::from_xyz(0.0, 1.25, 0.0);
     let obelisk_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.01, 0.004, 0.001),
+        base_color: Color::srgb(0.0, 0.0, 0.0),
         emissive: OBELISK_COLOR.to_linear(),
         ..default()
     });
@@ -96,7 +105,7 @@ fn setup(
     // camera
     let mut camera_emcds = commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(10.0, 10.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(20.0, 20.0, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
         FreeCamera {
             walk_speed: 10.0,
             run_speed: 20.0,
@@ -145,8 +154,8 @@ fn setup(
         CascadeShadowConfigBuilder {
             num_cascades: 2,
             minimum_distance: 0.05,
-            maximum_distance: 40.0,
-            first_cascade_far_bound: 5.0,
+            maximum_distance: 200.0,
+            first_cascade_far_bound: 100.0,
             overlap_proportion: 0.2,
         }
         .build(),
@@ -185,17 +194,21 @@ fn interact(
     let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_pos) else {
         return;
     };
-    let turret_cost = 100;
     if let Some(t) = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)) {
         let hitp = ray.origin + ray.direction.as_vec3() * t;
-        if player.monies >= turret_cost {
+        if player.monies >= TURRET_COST {
             cursor_trans.translation = hitp;
             if buttons.just_pressed(MouseButton::Left) {
-                player.monies -= turret_cost;
+                player.monies -= TURRET_COST;
                 commands.spawn((
                     SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("turret.glb"))),
                     Transform::from_translation(hitp).with_scale(Vec3::splat(0.75)),
                     Turret,
+                ));
+                commands.spawn((
+                    SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("laser.glb"))),
+                    Transform::from_translation(vec3(hitp.x, 2.95, hitp.z)),
+                    Laser::default(),
                 ));
             }
         } else {
@@ -216,6 +229,11 @@ struct CursorObject;
 #[derive(Component)]
 struct Turret;
 
+#[derive(Component, Default)]
+struct Laser {
+    target: Option<Entity>,
+}
+
 #[derive(Component)]
 struct Obelisk {
     pub health: f32,
@@ -224,7 +242,15 @@ struct Obelisk {
 }
 
 #[derive(Component)]
-struct Rat;
+struct Rat {
+    health: f32,
+}
+
+impl Default for Rat {
+    fn default() -> Self {
+        Self { health: 100.0 }
+    }
+}
 
 #[derive(Component)]
 struct EconText;
@@ -249,7 +275,7 @@ fn spawn_rats(
         commands.spawn((
             SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("rat1.glb"))),
             Transform::from_translation(vec3(x, 0.0, z)),
-            Rat,
+            Rat::default(),
         ));
         *time_since_last_spawn = 0.0;
     }
@@ -317,5 +343,43 @@ fn make_turrets_face_camera(
 
     for mut turret_trans in &mut turrets_trans {
         turret_trans.look_at(target, Vec3::Y);
+    }
+}
+
+fn lasers_shoot_at_rats(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut rats: Query<(Entity, &mut Transform, &mut Rat)>,
+    mut lasers: Query<(&mut Transform, &mut Laser, &mut Visibility), Without<Rat>>,
+    mut player: ResMut<PlayerData>,
+) {
+    let dt = time.delta_secs();
+    for (mut laser_trans, mut laser, mut laser_vis) in &mut lasers {
+        *laser_vis = Visibility::Hidden;
+        let mut need_new_target = true;
+        if let Some(target) = laser.target
+            && let Ok((rat_entity, rat_trans, mut rat)) = rats.get_mut(target)
+            && rat_trans.translation.distance(laser_trans.translation) < LASER_MAX_RANGE
+        {
+            need_new_target = false;
+            rat.health -= dt * TURRET_DMG;
+            if rat.health <= 0.0 {
+                commands.entity(rat_entity).despawn();
+                player.monies += PAY_FOR_KILL;
+            }
+            laser_trans.look_at(rat_trans.translation, Vec3::Y);
+            *laser_vis = Visibility::Visible;
+        }
+        if need_new_target {
+            laser.target = None;
+
+            let closest_dist = f32::MAX;
+            for (rat_entity, rat_trans, _rat) in &rats {
+                let new_dist = rat_trans.translation.distance(laser_trans.translation);
+                if new_dist < closest_dist && new_dist < LASER_MAX_RANGE {
+                    laser.target = Some(rat_entity);
+                }
+            }
+        }
     }
 }
