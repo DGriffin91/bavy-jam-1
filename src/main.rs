@@ -46,7 +46,10 @@ fn main() {
         }
     }
 
-    app.insert_resource(PlayerData { monies: 500 })
+    app.insert_resource(ClearColor(Color::BLACK))
+        .insert_resource(PlayerData {
+            monies: STARTING_MONIES,
+        })
         .add_plugins(DefaultPlugins.set(AssetPlugin {
             meta_check: AssetMetaCheck::Never,
             ..default()
@@ -72,9 +75,11 @@ fn main() {
 const OBELISK_COLOR: Color = Color::srgb(10.0, 4.0, 1.0);
 const MAX_HEALTH: f32 = 200.0;
 const LASER_MAX_RANGE: f32 = 30.0;
-const TURRET_DMG: f32 = 500.0;
-const PAY_FOR_KILL: u32 = 5;
+const TURRET_DMG: f32 = 340.0;
+const PAY_FOR_KILL: u32 = 2;
 const TURRET_COST: u32 = 100;
+const STARTING_MONIES: u32 = 200;
+const INITIAL_RAT_SPEED: f32 = 9.0;
 
 fn setup(
     mut commands: Commands,
@@ -84,7 +89,7 @@ fn setup(
     #[cfg(not(target_arch = "wasm32"))] args: Res<Args>,
 ) {
     commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(500.0, 500.0))),
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(5000.0, 5000.0))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::BLACK,
             perceptual_roughness: 0.3,
@@ -337,17 +342,21 @@ fn spawn_rats(
     time: Res<Time>,
     mut time_since_last_spawn: Local<f32>,
 ) {
-    let spawn_every = 0.002;
+    let elapse = time.elapsed_secs();
+    let spawn_every = 200.0 / (elapse.powf(2.5));
     *time_since_last_spawn += time.delta_secs();
     if *time_since_last_spawn >= spawn_every {
-        let n = hash_noise(uvec2(0, 0), (time.elapsed_secs() / spawn_every) as u32);
-        let x = (n * TAU).cos() * 100.0;
-        let z = (n * TAU).sin() * 100.0;
-        commands.spawn((
-            SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("rat1.glb"))),
-            Transform::from_translation(vec3(x, 0.0, z)),
-            Rat::default(),
-        ));
+        let spawn_count = (*time_since_last_spawn / spawn_every) as u32;
+        for i in 0..spawn_count {
+            let n = hash_noise(uvec2(i, 0), (time.elapsed_secs() / spawn_every) as u32);
+            let x = (n * TAU).cos() * 100.0;
+            let z = (n * TAU).sin() * 100.0;
+            commands.spawn((
+                SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("rat1.glb"))),
+                Transform::from_translation(vec3(x, 0.0, z)),
+                Rat::default(),
+            ));
+        }
         *time_since_last_spawn = 0.0;
     }
 }
@@ -357,7 +366,7 @@ fn move_rats(
     mut rats: Query<&mut Transform, With<Rat>>,
     turrets_trans: Query<&Transform, (With<Turret>, Without<Rat>)>,
 ) {
-    let rat_speed = 9.0;
+    let rat_speed = INITIAL_RAT_SPEED + time.elapsed_secs() * 0.2;
     let spread = 3.0;
     for (i, mut rat_trans) in &mut rats.iter_mut().enumerate() {
         let v = hash_noise(uvec2(i as u32, 0), time.elapsed_secs() as u32);
@@ -389,7 +398,7 @@ fn rats_reach_center(
     let relative_health = obelisk.health / MAX_HEALTH;
     for (entity, rat_trans) in &rats {
         if rat_trans.translation.distance(Vec3::ZERO) < 1.0 {
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
             obelisk.health -= 1.0;
             if obelisk.health <= 0.0 {
                 unreachable!("How could you");
@@ -436,7 +445,7 @@ fn lasers_shoot_at_rats(
             need_new_target = false;
             rat.health -= dt * TURRET_DMG;
             if rat.health <= 0.0 {
-                commands.entity(rat_entity).despawn();
+                commands.entity(rat_entity).try_despawn();
                 player.monies += PAY_FOR_KILL;
             }
             laser_trans.look_at(rat_trans.translation, Vec3::Y);
