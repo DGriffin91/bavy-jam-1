@@ -20,6 +20,7 @@ pub mod noise;
 
 fn main() {
     App::new()
+        .insert_resource(PlayerData { monies: 500 })
         .add_plugins(DefaultPlugins.set(AssetPlugin {
             meta_check: AssetMetaCheck::Never,
             ..default()
@@ -27,7 +28,16 @@ fn main() {
         .add_plugins(FreeCameraPlugin)
         .insert_resource(GlobalAmbientLight::NONE)
         .add_systems(Startup, setup)
-        .add_systems(Update, (interact, spawn_rats, move_rats, rats_reach_center))
+        .add_systems(
+            Update,
+            (
+                interact,
+                spawn_rats,
+                move_rats,
+                rats_reach_center,
+                set_hud_ui,
+            ),
+        )
         .run();
 }
 
@@ -143,6 +153,22 @@ fn setup(
         }
         .build(),
     ));
+
+    commands
+        .spawn((
+            Node {
+                left: px(1.5),
+                top: px(1.5),
+                ..default()
+            },
+            GlobalZIndex(-1),
+        ))
+        .with_children(|parent| {
+            parent.spawn((Text::new(""), TextColor(Color::BLACK), EconText));
+        });
+    commands.spawn(Node::default()).with_children(|parent| {
+        parent.spawn((Text::new(""), TextColor(Color::WHITE), EconText));
+    });
 }
 
 fn interact(
@@ -153,6 +179,7 @@ fn interact(
     buttons: Res<ButtonInput<MouseButton>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut player: ResMut<PlayerData>,
 ) {
     let Some(cursor_pos) = window.cursor_position() else {
         return;
@@ -161,17 +188,25 @@ fn interact(
     let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_pos) else {
         return;
     };
+    let turret_cost = 100;
     if let Some(t) = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)) {
         let hitp = ray.origin + ray.direction.as_vec3() * t;
         cursor_trans.translation = hitp;
-        if buttons.just_pressed(MouseButton::Left) {
+        if buttons.just_pressed(MouseButton::Left) && player.monies >= turret_cost {
+            player.monies -= turret_cost;
             commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(0.5, 2.0, 0.5))),
-                MeshMaterial3d(materials.add(Color::srgb_u8(128, 128, 128))),
+                Mesh3d(meshes.add(Cuboid::new(0.75, 3.0, 0.75))),
+                MeshMaterial3d(materials.add(Color::srgb_u8(32, 32, 32))),
                 Transform::from_translation(hitp),
                 Turret,
             ));
         }
+    }
+}
+
+fn set_hud_ui(mut text: Query<&mut Text, With<EconText>>, player: Res<PlayerData>) {
+    for mut t in &mut text {
+        t.0 = format!("${}", player.monies);
     }
 }
 
@@ -191,13 +226,21 @@ struct Obelisk {
 #[derive(Component)]
 struct Rat;
 
+#[derive(Component)]
+struct EconText;
+
+#[derive(Resource)]
+struct PlayerData {
+    monies: u32,
+}
+
 fn spawn_rats(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     time: Res<Time>,
     mut time_since_last_spawn: Local<f32>,
 ) {
-    let spawn_every = 0.01;
+    let spawn_every = 0.002;
     *time_since_last_spawn += time.delta_secs();
     if *time_since_last_spawn >= spawn_every {
         let n = hash_noise(uvec2(0, 0), (time.elapsed_secs() / spawn_every) as u32);
@@ -213,9 +256,12 @@ fn spawn_rats(
 }
 
 fn move_rats(time: Res<Time>, mut rats: Query<&mut Transform, With<Rat>>) {
-    let rat_speed = 30.0;
-    for mut rat_trans in &mut rats {
-        let dest = Vec3::ZERO;
+    let rat_speed = 10.0;
+    let spread = 5.0;
+    for (i, mut rat_trans) in &mut rats.iter_mut().enumerate() {
+        let x = hash_noise(uvec2(i as u32, 0), time.elapsed_secs() as u32) * 2.0 - 1.0;
+        let y = hash_noise(uvec2(i as u32, 1), time.elapsed_secs() as u32) * 2.0 - 1.0;
+        let dest = vec3(x * spread, 0.0, y * spread);
         let dir = (dest - rat_trans.translation).normalize_or_zero();
         *rat_trans = rat_trans.looking_at(dest, Vec3::Y);
         rat_trans.translation += dir * time.delta_secs() * rat_speed;
@@ -233,6 +279,9 @@ fn rats_reach_center(
         if rat_trans.translation.distance(Vec3::ZERO) < 1.0 {
             commands.entity(entity).despawn();
             obelisk.health -= 1.0;
+            if obelisk.health <= 0.0 {
+                unreachable!("How could you");
+            }
             if let Some(mut mat) = materials.get_mut(obelisk.material.id()) {
                 mat.emissive = LinearRgba::from_vec3(mat.emissive.to_vec3() * 0.9);
             }
