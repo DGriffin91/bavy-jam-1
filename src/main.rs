@@ -9,11 +9,13 @@ use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin};
 use bevy::light::{CascadeShadowConfigBuilder, NotShadowCaster};
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::pbr::{ContactShadows, ScreenSpaceAmbientOcclusion};
-use bevy::post_process::bloom::Bloom;
+use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
+use bevy::post_process::dof::DepthOfField;
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::post_process::motion_blur::MotionBlur;
 use bevy::prelude::*;
 use std::f32::consts::{PI, TAU};
+use std::ops::DerefMut;
 
 use crate::noise::hash_noise;
 
@@ -26,6 +28,10 @@ pub struct Args {
     /// enable ssr
     #[argh(switch)]
     ssr: bool,
+
+    /// enable dof
+    #[argh(switch)]
+    dof: bool,
 }
 
 fn main() {
@@ -35,6 +41,9 @@ fn main() {
     {
         let args: Args = argh::from_env();
         app.insert_resource(args.clone());
+        if args.ssr {
+            app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::deferred());
+        }
     }
 
     app.insert_resource(PlayerData { monies: 500 })
@@ -137,7 +146,19 @@ fn setup(
         },
         Hdr,
         Bloom {
-            intensity: 0.1,
+            #[cfg(not(target_arch = "wasm32"))]
+            intensity: 0.4,
+            #[cfg(target_arch = "wasm32")]
+            intensity: 0.2, // Stronger for some reason
+            low_frequency_boost: 0.4,
+            low_frequency_boost_curvature: 0.95,
+            high_pass_frequency: 1.0,
+            prefilter: BloomPrefilter {
+                threshold: 0.0,
+                threshold_softness: 0.0,
+            },
+            composite_mode: BloomCompositeMode::Additive,
+            scale: Vec2::ONE,
             ..default()
         },
     ));
@@ -150,7 +171,7 @@ fn setup(
         ScreenSpaceAmbientOcclusion::default(),
         TemporalAntiAliasing::default(),
         MotionBlur {
-            shutter_angle: 1.0,
+            shutter_angle: 4.0,
             ..Default::default()
         },
     ));
@@ -166,6 +187,18 @@ fn setup(
             thickness: 0.25,
             linear_march_exponent: 1.0,
             edge_fadeout: 0.0..0.0,
+        });
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    if args.dof {
+        camera_emcds.insert(bevy::post_process::dof::DepthOfField {
+            mode: bevy::post_process::dof::DepthOfFieldMode::Bokeh,
+            focal_distance: 10.0,
+            aperture_f_stops: 0.2,
+            sensor_height: 0.1866,
+            max_circle_of_confusion_diameter: 64.0,
+            max_depth: f32::INFINITY,
         });
     }
 
@@ -213,7 +246,10 @@ fn setup(
 fn interact(
     mut commands: Commands,
     window: Single<&Window>,
-    camera: Single<(&Camera, &GlobalTransform)>,
+    mut camera: Single<
+        (&Camera, &GlobalTransform, Option<&mut DepthOfField>),
+        Without<CursorObject>,
+    >,
     mut cursor_trans: Single<&mut Transform, With<CursorObject>>,
     buttons: Res<ButtonInput<MouseButton>>,
     mut player: ResMut<PlayerData>,
@@ -222,12 +258,15 @@ fn interact(
     let Some(cursor_pos) = window.cursor_position() else {
         return;
     };
-    let (camera, camera_transform) = *camera;
+    let (camera, camera_transform, dof) = camera.deref_mut();
     let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_pos) else {
         return;
     };
     if let Some(t) = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)) {
         let hitp = ray.origin + ray.direction.as_vec3() * t;
+        if let Some(dof) = dof {
+            dof.focal_distance = hitp.distance(camera_transform.translation());
+        }
         if player.monies >= TURRET_COST {
             cursor_trans.translation = hitp;
             if buttons.just_pressed(MouseButton::Left) {
