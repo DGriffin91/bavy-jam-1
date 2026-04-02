@@ -5,7 +5,8 @@ use bevy::anti_alias::taa::TemporalAntiAliasing;
 use bevy::asset::AssetMetaCheck;
 use bevy::camera::Hdr;
 use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin};
-use bevy::light::CascadeShadowConfigBuilder;
+use bevy::light::{CascadeShadowConfigBuilder, NotShadowCaster};
+use bevy::math::VectorSpace;
 use bevy::pbr::{ContactShadows, ScreenSpaceAmbientOcclusion};
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
@@ -19,6 +20,7 @@ fn main() {
         .add_plugins(FreeCameraPlugin)
         .insert_resource(GlobalAmbientLight::NONE)
         .add_systems(Startup, setup)
+        .add_systems(Update, interact)
         .run();
 }
 
@@ -31,9 +33,37 @@ fn setup(
     commands.spawn(SceneRoot(
         asset_server.load(GltfAssetLabel::Scene(0).from_asset("rat1.glb")),
     ));
+
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::default().mesh().size(500.0, 500.0))),
         MeshMaterial3d(materials.add(Color::srgb(0.001, 0.05, 0.001))),
+    ));
+
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(0.5, 0.5, 0.5))),
+        MeshMaterial3d(materials.add(Color::srgb_u8(128, 128, 128))),
+        Transform::from_xyz(0.0, 0.5, 0.0),
+        CursorObject,
+    ));
+
+    // obelisk or somesuch
+    let obelisk_color = Color::srgb(10.0, 4.0, 1.0);
+    let obelisk_pos = Transform::from_xyz(0.0, 1.25, 0.0);
+    commands.spawn((
+        Mesh3d(meshes.add(Sphere::new(1.0).mesh().uv(64, 48))),
+        MeshMaterial3d(materials.add(obelisk_color)),
+        obelisk_pos,
+        NotShadowCaster,
+    ));
+    commands.spawn((
+        PointLight {
+            intensity: 800.0,
+            radius: 0.125,
+            shadow_maps_enabled: true,
+            color: obelisk_color,
+            ..default()
+        },
+        obelisk_pos,
     ));
 
     // camera
@@ -91,3 +121,39 @@ fn setup(
         .build(),
     ));
 }
+
+fn interact(
+    mut commands: Commands,
+    window: Single<&Window>,
+    camera: Single<(&Camera, &GlobalTransform)>,
+    mut cursor_trans: Single<&mut Transform, With<CursorObject>>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let Some(cursor_pos) = window.cursor_position() else {
+        return;
+    };
+    let (camera, camera_transform) = *camera;
+    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_pos) else {
+        return;
+    };
+    if let Some(t) = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)) {
+        let hitp = ray.origin + ray.direction.as_vec3() * t;
+        cursor_trans.translation = hitp;
+        if buttons.just_pressed(MouseButton::Left) {
+            commands.spawn((
+                Mesh3d(meshes.add(Cuboid::new(0.5, 2.0, 0.5))),
+                MeshMaterial3d(materials.add(Color::srgb_u8(128, 128, 128))),
+                Transform::from_translation(hitp),
+                Turret,
+            ));
+        }
+    }
+}
+
+#[derive(Component)]
+struct CursorObject;
+
+#[derive(Component)]
+struct Turret;
