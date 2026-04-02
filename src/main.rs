@@ -77,7 +77,7 @@ fn main() {
 const OBELISK_COLOR: Color = Color::srgb(10.0, 4.0, 1.0);
 const MAX_HEALTH: f32 = 200.0;
 const LASER_MAX_RANGE: f32 = 30.0;
-const TURRET_DMG: f32 = 340.0;
+const TURRET_DMG: f32 = 350.0;
 const PAY_FOR_KILL: u32 = 2;
 const TURRET_COST: u32 = 100;
 const STARTING_MONIES: u32 = 200;
@@ -375,7 +375,8 @@ fn spawn_rats(
             let z = (n * TAU).sin() * 100.0;
             commands.spawn((
                 SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("rat1.glb"))),
-                Transform::from_translation(vec3(x, 0.0, z)),
+                Transform::from_translation(vec3(x, 0.0, z))
+                    .with_scale(1.0 + Vec3::splat(elapse.powf(0.3))),
                 Rat::default(),
             ));
         }
