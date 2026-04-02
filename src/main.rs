@@ -50,6 +50,7 @@ fn main() {
         .insert_resource(PlayerData {
             monies: STARTING_MONIES,
             kills: 0,
+            started: false,
         })
         .add_plugins(DefaultPlugins.set(AssetPlugin {
             meta_check: AssetMetaCheck::Never,
@@ -276,6 +277,7 @@ fn interact(
         if player.monies >= TURRET_COST {
             cursor_trans.translation = hitp;
             if buttons.just_pressed(MouseButton::Left) {
+                player.started = true;
                 player.monies -= TURRET_COST;
                 commands.spawn((
                     SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("turret.glb"))),
@@ -300,10 +302,14 @@ fn set_hud_ui(
     obelisk: Single<&Obelisk>,
 ) {
     for mut t in &mut text {
-        t.0 = format!(
-            "$$$$$$ {}\nKILLLS {}\nHEALTH {}",
-            player.monies, player.kills, obelisk.health as u32
-        );
+        t.0 = if player.started {
+            format!(
+                "$$$$$$ {}\nKILLLS {}\nHEALTH {}",
+                player.monies, player.kills, obelisk.health as u32
+            )
+        } else {
+            String::from("PLACE TURRET TO START")
+        };
     }
 }
 
@@ -343,6 +349,7 @@ struct EconText;
 struct PlayerData {
     monies: u32,
     kills: u32,
+    started: bool,
 }
 
 fn spawn_rats(
@@ -350,14 +357,20 @@ fn spawn_rats(
     asset_server: Res<AssetServer>,
     time: Res<Time>,
     mut time_since_last_spawn: Local<f32>,
+    player: Res<PlayerData>,
+    mut player_started_offset: Local<f32>,
 ) {
-    let elapse = time.elapsed_secs();
+    if !player.started {
+        *player_started_offset = time.elapsed_secs();
+        return;
+    }
+    let elapse = time.elapsed_secs() - *player_started_offset;
     let spawn_every = 200.0 / (elapse.powf(2.5));
     *time_since_last_spawn += time.delta_secs();
     if *time_since_last_spawn >= spawn_every {
         let spawn_count = (*time_since_last_spawn / spawn_every) as u32;
         for i in 0..spawn_count {
-            let n = hash_noise(uvec2(i, 0), (time.elapsed_secs() / spawn_every) as u32);
+            let n = hash_noise(uvec2(i, 0), (elapse / spawn_every) as u32);
             let x = (n * TAU).cos() * 100.0;
             let z = (n * TAU).sin() * 100.0;
             commands.spawn((
