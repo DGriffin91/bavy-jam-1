@@ -93,13 +93,13 @@ fn setup(
     let obelisk_pos = Transform::from_xyz(0.0, 1.25, 0.0);
     let obelisk_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.0, 0.0, 0.0),
-        emissive: OBELISK_COLOR.to_linear(),
+        emissive: OBELISK_COLOR.to_linear() * 10.0,
         ..default()
     });
     let light_entity = commands
         .spawn((
             PointLight {
-                intensity: 800.0,
+                intensity: 5000.0,
                 radius: 0.125,
                 shadow_maps_enabled: true,
                 color: OBELISK_COLOR,
@@ -356,11 +356,12 @@ fn rats_reach_center(
                 unreachable!("How could you");
             }
             if let Some(mut mat) = materials.get_mut(obelisk.material.id()) {
-                mat.emissive =
-                    LinearRgba::from_vec3(OBELISK_COLOR.to_srgba().to_vec3() * relative_health);
+                mat.emissive = LinearRgba::from_vec3(
+                    OBELISK_COLOR.to_linear().to_vec3() * relative_health * 10.0,
+                );
             }
             if let Ok(mut obelisk_light) = lights.get_mut(obelisk.light_entity) {
-                obelisk_light.intensity *= relative_health;
+                obelisk_light.intensity = relative_health * 5000.0;
             }
         }
     }
