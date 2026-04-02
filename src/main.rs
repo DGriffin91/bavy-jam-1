@@ -49,6 +49,7 @@ fn main() {
     app.insert_resource(ClearColor(Color::BLACK))
         .insert_resource(PlayerData {
             monies: STARTING_MONIES,
+            kills: 0,
         })
         .add_plugins(DefaultPlugins.set(AssetPlugin {
             meta_check: AssetMetaCheck::Never,
@@ -293,9 +294,16 @@ fn interact(
     }
 }
 
-fn set_hud_ui(mut text: Query<&mut Text, With<EconText>>, player: Res<PlayerData>) {
+fn set_hud_ui(
+    mut text: Query<&mut Text, With<EconText>>,
+    player: Res<PlayerData>,
+    obelisk: Single<&Obelisk>,
+) {
     for mut t in &mut text {
-        t.0 = format!("${}", player.monies);
+        t.0 = format!(
+            "$$$$$$ {}\nKILLLS {}\nHEALTH {}",
+            player.monies, player.kills, obelisk.health as u32
+        );
     }
 }
 
@@ -334,6 +342,7 @@ struct EconText;
 #[derive(Resource)]
 struct PlayerData {
     monies: u32,
+    kills: u32,
 }
 
 fn spawn_rats(
@@ -394,6 +403,7 @@ fn rats_reach_center(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut obelisk: Single<&mut Obelisk>,
     mut lights: Query<&mut PointLight, Without<Obelisk>>,
+    player: Res<PlayerData>,
 ) {
     let relative_health = obelisk.health / MAX_HEALTH;
     for (entity, rat_trans) in &rats {
@@ -401,6 +411,10 @@ fn rats_reach_center(
             commands.entity(entity).try_despawn();
             obelisk.health -= 1.0;
             if obelisk.health <= 0.0 {
+                println!(
+                    "$$$$$$ {}\nKILLLS {}\nHEALTH {}",
+                    player.monies, player.kills, obelisk.health as u32
+                );
                 unreachable!("How could you");
             }
             if let Some(mut mat) = materials.get_mut(obelisk.material.id()) {
@@ -447,6 +461,7 @@ fn lasers_shoot_at_rats(
             if rat.health <= 0.0 {
                 commands.entity(rat_entity).try_despawn();
                 player.monies += PAY_FOR_KILL;
+                player.kills += 1;
             }
             laser_trans.look_at(rat_trans.translation, Vec3::Y);
             *laser_vis = Visibility::Visible;
