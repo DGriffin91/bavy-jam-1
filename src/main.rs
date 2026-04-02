@@ -41,6 +41,9 @@ fn main() {
         .run();
 }
 
+const OBELISK_COLOR: Color = Color::srgb(10.0, 4.0, 1.0);
+const MAX_HEALTH: f32 = 200.0;
+
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -64,11 +67,10 @@ fn setup(
     ));
 
     // obelisk or somesuch
-    let obelisk_color = Color::srgb(10.0, 4.0, 1.0);
     let obelisk_pos = Transform::from_xyz(0.0, 1.25, 0.0);
     let obelisk_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.01, 0.004, 0.001),
-        emissive: obelisk_color.to_linear(),
+        emissive: OBELISK_COLOR.to_linear(),
         ..default()
     });
     let light_entity = commands
@@ -77,7 +79,7 @@ fn setup(
                 intensity: 800.0,
                 radius: 0.125,
                 shadow_maps_enabled: true,
-                color: obelisk_color,
+                color: OBELISK_COLOR,
                 ..default()
             },
             obelisk_pos,
@@ -89,7 +91,7 @@ fn setup(
         obelisk_pos,
         NotShadowCaster,
         Obelisk {
-            health: 100.0,
+            health: MAX_HEALTH,
             material: obelisk_material,
             light_entity,
         },
@@ -255,13 +257,27 @@ fn spawn_rats(
     }
 }
 
-fn move_rats(time: Res<Time>, mut rats: Query<&mut Transform, With<Rat>>) {
-    let rat_speed = 10.0;
-    let spread = 5.0;
+fn move_rats(
+    time: Res<Time>,
+    mut rats: Query<&mut Transform, With<Rat>>,
+    turrets_trans: Query<&Transform, (With<Turret>, Without<Rat>)>,
+) {
+    let rat_speed = 9.0;
+    let spread = 3.0;
     for (i, mut rat_trans) in &mut rats.iter_mut().enumerate() {
-        let x = hash_noise(uvec2(i as u32, 0), time.elapsed_secs() as u32) * 2.0 - 1.0;
-        let y = hash_noise(uvec2(i as u32, 1), time.elapsed_secs() as u32) * 2.0 - 1.0;
-        let dest = vec3(x * spread, 0.0, y * spread);
+        let v = hash_noise(uvec2(i as u32, 0), time.elapsed_secs() as u32);
+        let scale = hash_noise(uvec2(i as u32, 1), time.elapsed_secs() as u32);
+        let mut dest = vec3(
+            (v * TAU).sin() * spread * scale,
+            0.0,
+            (v * TAU).cos() * spread * scale,
+        );
+        for turrets_trans in &turrets_trans {
+            if turrets_trans.translation.distance(rat_trans.translation) < 2.0 {
+                dest = turrets_trans.translation
+                    + rat_trans.translation.cross(turrets_trans.translation) * 5.0;
+            }
+        }
         let dir = (dest - rat_trans.translation).normalize_or_zero();
         *rat_trans = rat_trans.looking_at(dest, Vec3::Y);
         rat_trans.translation += dir * time.delta_secs() * rat_speed;
@@ -275,6 +291,7 @@ fn rats_reach_center(
     mut obelisk: Single<&mut Obelisk>,
     mut lights: Query<&mut PointLight, Without<Obelisk>>,
 ) {
+    let relative_health = obelisk.health / MAX_HEALTH;
     for (entity, rat_trans) in &rats {
         if rat_trans.translation.distance(Vec3::ZERO) < 1.0 {
             commands.entity(entity).despawn();
@@ -283,10 +300,11 @@ fn rats_reach_center(
                 unreachable!("How could you");
             }
             if let Some(mut mat) = materials.get_mut(obelisk.material.id()) {
-                mat.emissive = LinearRgba::from_vec3(mat.emissive.to_vec3() * 0.9);
+                mat.emissive =
+                    LinearRgba::from_vec3(OBELISK_COLOR.to_srgba().to_vec3() * relative_health);
             }
             if let Ok(mut obelisk_light) = lights.get_mut(obelisk.light_entity) {
-                obelisk_light.intensity *= 0.9;
+                obelisk_light.intensity *= relative_health;
             }
         }
     }
