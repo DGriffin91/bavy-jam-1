@@ -13,7 +13,10 @@ opt-level = 3
 opt-level = 3
 
 [dependencies]
-bevy = { git = "https://github.com/bevyengine/bevy", rev = "d06aa47744dfa378f2e8a31cd7ff2d59c9afe4b9" }
+bevy = { git = "https://github.com/bevyengine/bevy", rev = "d06aa47744dfa378f2e8a31cd7ff2d59c9afe4b9", features = [
+  "bevy_camera_controller",
+  "free_camera",
+] }
 
 # These lints may be important signals about code quality, but normal Bevy code
 # commonly triggers them and the CI workflow treats them as errors, so we've
